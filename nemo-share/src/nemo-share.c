@@ -508,29 +508,33 @@ property_page_validate (PropertyPage *page)
   // Check if the path is fully accessible by everybody
   gint exit_status;
   gchar *output = NULL;
-  const gchar *command = g_strdup_printf ("%s/check-directory-permissions %s", PKGDATADIR, page->path);
+  gchar *argv[] = { PKGDATADIR "/check-directory-permissions", page->path, NULL };
   error = NULL;
-  if (!g_spawn_command_line_sync (command,
-                                  &output,
-                                  NULL,
-                                  &exit_status,
-                                  &error))
+  if (!g_spawn_sync (NULL,
+                     argv,
+                     NULL,
+                     G_SPAWN_DEFAULT,
+                     NULL,
+                     NULL,
+                     &output,
+                     NULL,
+                     &exit_status,
+                     &error))
     {
       g_printerr ("Could not spawn check-directory-permissions: %s\n", error->message);
       g_error_free (error);
     }
-  else
+  else if (exit_status != EXIT_SUCCESS)
     {
-      if (exit_status != EXIT_SUCCESS)
-        {
-          char * message;
-          message = g_strdup_printf(_("The permissions for %s prevent other users from accessing this share"), output);
-          property_page_set_error (page, message);
-          g_free (message);
-          return FALSE;
-        }
+      char *message;
+      message = g_strdup_printf (_("The permissions for %s prevent other users from accessing this share"), g_strstrip (output));
+      property_page_set_error (page, message);
+      g_free (message);
       g_free (output);
+      return FALSE;
     }
+
+  g_free (output);
 
   property_page_set_normal (page);
   return TRUE;
@@ -651,10 +655,16 @@ check_samba_installed (void)
 {
   gboolean installed;
   gboolean permitted;
+  gboolean enabled;
   gchar *id_cmd;
   gchar *output;
 
   installed = g_file_test ("/usr/sbin/smbd", G_FILE_TEST_IS_EXECUTABLE);
+
+  if (!installed)
+    return FALSE;
+
+  shares_usershares_enabled (&enabled, NULL);
 
   id_cmd = g_strdup_printf ("id -Gn %s", g_get_user_name ());
   output = NULL;
@@ -671,7 +681,7 @@ check_samba_installed (void)
 
   g_free (id_cmd);
 
-  return installed && permitted;
+  return enabled && permitted;
 }
 
 static void

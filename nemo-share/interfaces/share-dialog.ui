@@ -479,7 +479,7 @@
               <object class="GtkLabel" id="samba_label">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="label" translatable="yes">Samba needs to be installed, appropriate firewall rules need to be added and your user account needs to join the 'sambashare' group.</property>
+                <property name="label" translatable="yes">Samba needs to be installed with user sharing enabled, appropriate firewall rules need to be added and your user account needs to join the 'sambashare' group.</property>
                 <property name="wrap">True</property>
               </object>
               <packing>

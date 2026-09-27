@@ -302,8 +302,10 @@ get_string_from_key_file (GKeyFile *key_file, const char *group, const char *key
 	error = NULL;
 	str = NULL;
 
+	/* "net usershare" doesn't escape its output, so read values raw:
+	 * the acl contains "Unix User\name" which isn't a valid escape sequence. */
 	if (g_key_file_has_key (key_file, group, key, &error)) {
-		str = g_key_file_get_string (key_file, group, key, &error);
+		str = g_key_file_get_value (key_file, group, key, &error);
 		if (!str) {
 			g_assert (!g_error_matches (error, G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_NOT_FOUND)
 				  && !g_error_matches (error, G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_GROUP_NOT_FOUND));
@@ -504,36 +506,28 @@ copy_share_info (ShareInfo *info)
 	return copy;
 }
 
-/**
- * shares_supports_guest_ok:
- * @supports_guest_ok_ret: Location to store whether "usershare allow guests"
- * is enabled.
- * @error: Location to store error, or #NULL.
- *
- * Determines whether the option "usershare allow guests" is enabled in samba
- * config as shown by testparm.
- *
- * Return value: #TRUE if if the info could be queried successfully, #FALSE
- * otherwise.  If this function returns #FALSE, an error code will be returned
- * in the @error argument, and *@ret_info_list will be set to #FALSE.
- **/
-gboolean
-shares_supports_guest_ok (gboolean *supports_guest_ok_ret, GError **error)
+/* Queries a single [global] parameter's effective value via testparm */
+static gboolean
+testparm_get_parameter (const char *parameter, char **value_ret, GError **error)
 {
 	gboolean retval;
 	gboolean result;
+	char *command;
 	char *stdout_contents;
 	char *stderr_contents;
 	int exit_status;
 	int exit_code;
 
-	*supports_guest_ok_ret = FALSE;
+	*value_ret = NULL;
 
-	result = g_spawn_command_line_sync ("testparm -s --parameter-name='usershare allow guests'",
+	command = g_strdup_printf ("testparm -s --parameter-name='%s'", parameter);
+	result = g_spawn_command_line_sync (command,
 					    &stdout_contents,
 					    &stderr_contents,
 					    &exit_status,
 					    error);
+	g_free (command);
+
 	if (!result)
 		return FALSE;
 
@@ -586,13 +580,72 @@ shares_supports_guest_ok (gboolean *supports_guest_ok_ret, GError **error)
 	}
 
 	retval = TRUE;
-	*supports_guest_ok_ret = (g_ascii_strncasecmp (stdout_contents, "Yes", 3) == 0);
+	*value_ret = g_strstrip (stdout_contents);
+	stdout_contents = NULL;
 
  out:
 	g_free (stdout_contents);
 	g_free (stderr_contents);
 
 	return retval;
+}
+
+/**
+ * shares_supports_guest_ok:
+ * @supports_guest_ok_ret: Location to store whether "usershare allow guests"
+ * is enabled.
+ * @error: Location to store error, or #NULL.
+ *
+ * Determines whether the option "usershare allow guests" is enabled in samba
+ * config as shown by testparm.
+ *
+ * Return value: #TRUE if if the info could be queried successfully, #FALSE
+ * otherwise.  If this function returns #FALSE, an error code will be returned
+ * in the @error argument, and *@supports_guest_ok_ret will be set to #FALSE.
+ **/
+gboolean
+shares_supports_guest_ok (gboolean *supports_guest_ok_ret, GError **error)
+{
+	char *value;
+
+	*supports_guest_ok_ret = FALSE;
+
+	if (!testparm_get_parameter ("usershare allow guests", &value, error))
+		return FALSE;
+
+	*supports_guest_ok_ret = (g_ascii_strncasecmp (value, "Yes", 3) == 0);
+	g_free (value);
+
+	return TRUE;
+}
+
+/**
+ * shares_usershares_enabled:
+ * @enabled_ret: Location to store whether usershares are enabled.
+ * @error: Location to store error, or #NULL.
+ *
+ * Determines whether "usershare max shares" is non-zero in samba config as
+ * shown by testparm.  Samba's upstream default is 0, which disables
+ * usershares entirely.
+ *
+ * Return value: #TRUE if if the info could be queried successfully, #FALSE
+ * otherwise.  If this function returns #FALSE, an error code will be returned
+ * in the @error argument, and *@enabled_ret will be set to #FALSE.
+ **/
+gboolean
+shares_usershares_enabled (gboolean *enabled_ret, GError **error)
+{
+	char *value;
+
+	*enabled_ret = FALSE;
+
+	if (!testparm_get_parameter ("usershare max shares", &value, error))
+		return FALSE;
+
+	*enabled_ret = g_ascii_strtoll (value, NULL, 10) > 0;
+	g_free (value);
+
+	return TRUE;
 }
 
 static gboolean

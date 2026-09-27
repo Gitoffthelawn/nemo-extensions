@@ -39,6 +39,9 @@ void shares_free_share_info_list (GSList *list);
 gboolean shares_supports_guest_ok (gboolean *supports_guest_ok_ret, 
 				   GError **error);
 
+gboolean shares_usershares_enabled (gboolean *enabled_ret,
+				    GError **error);
+
 void shares_set_debug (gboolean error_on_refresh,
 		       gboolean error_on_add,
 		       gboolean error_on_modify,

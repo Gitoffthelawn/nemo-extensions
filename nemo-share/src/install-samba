@@ -6,10 +6,40 @@ from gi.repository import CinnamonDesktop, GLib
 
 import sys
 import os
+import re
 import pwd
 import subprocess
 
 import aptkit.simpleclient
+
+SMB_CONF = "/etc/samba/smb.conf"
+
+# Debian's samba package stopped patching the upstream default of
+# "usershare max shares" (0 = disabled) in 2:4.23.0+dfsg-4, so a fresh
+# install has usershares turned off.  samba.postinst only adds the parameter
+# when upgrading from an older version; this mirrors that hunk for the
+# fresh-install case.
+def enable_usershares():
+    if not os.path.exists(SMB_CONF):
+        return
+
+    cp = subprocess.run(["testparm", "-s", "--section-name=global"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+
+    if "usershare max shares = " in cp.stdout:
+        return
+
+    with open(SMB_CONF) as f:
+        for n, text in enumerate(f, start=1):
+            if re.match(r"^\s*\[\s*g\s*l\s*o\s*b\s*a\s*l\s*\]", text, re.IGNORECASE):
+                break
+        else:
+            print("No [global] section in %s, not enabling usershares" % SMB_CONF)
+            return
+
+    subprocess.run(["sed", "-i", "%d a\\\n"
+                    "# Prior to version 4.23.0+dfsg-4, debian samba package carried usershare.patch\\\n"
+                    "# patch which changed default value for \"usershare max share\" parameter\\\n"
+                    "    usershare max shares = 100" % n, SMB_CONF], check=True)
 
 class Main:
     def __init__(self, user):
@@ -28,6 +58,7 @@ class Main:
             try:
                 cp = subprocess.run(["usermod", "-a", "-G", "sambashare", self.user], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 ret = cp.returncode
+                enable_usershares()
             except subprocess.CalledProcessError as e:
                 print(str(e))
                 ret = e.returncode
